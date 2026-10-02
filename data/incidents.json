@@ -1,0 +1,88 @@
+{
+  "incidents": [
+    {
+      "id": "b48a85d3-8c53-43f0-b4ef-75d5a1f00d63",
+      "emergencyType": "medical",
+      "description": null,
+      "location": {
+        "coords": null,
+        "address": null,
+        "description": null,
+        "source": "manual"
+      },
+      "reportedBy": null,
+      "contact": null,
+      "status": "pending",
+      "priority": "critical",
+      "createdAt": "2026-10-02T04:58:02.674Z",
+      "updatedAt": "2026-10-02T04:58:02.674Z",
+      "acknowledgedAt": null,
+      "resolvedAt": null,
+      "assignedTo": null,
+      "notes": []
+    },
+    {
+      "id": "c8a3fb44-0fe9-461b-ad58-88700e198777",
+      "emergencyType": "medical",
+      "description": "I have a heart attack",
+      "location": {
+        "coords": null,
+        "address": null,
+        "description": "LT Social science",
+        "source": "manual"
+      },
+      "reportedBy": null,
+      "contact": null,
+      "status": "in_progress",
+      "priority": "critical",
+      "createdAt": "2026-10-02T05:33:29.915Z",
+      "updatedAt": "2026-10-02T05:43:20.839Z",
+      "acknowledgedAt": "2026-10-02T05:33:58.094Z",
+      "resolvedAt": null,
+      "assignedTo": null,
+      "notes": []
+    },
+    {
+      "id": "a1e922d3-7ec5-459c-8b38-22b1f036db4a",
+      "emergencyType": "medical",
+      "description": null,
+      "location": {
+        "coords": null,
+        "address": null,
+        "description": null,
+        "source": "manual"
+      },
+      "reportedBy": null,
+      "contact": null,
+      "status": "pending",
+      "priority": "critical",
+      "createdAt": "2026-10-02T05:57:21.654Z",
+      "updatedAt": "2026-10-02T05:57:21.654Z",
+      "acknowledgedAt": null,
+      "resolvedAt": null,
+      "assignedTo": null,
+      "notes": []
+    },
+    {
+      "id": "63dd9792-8028-4c56-99c4-7860d860737f",
+      "emergencyType": "medical",
+      "description": null,
+      "location": {
+        "coords": null,
+        "address": null,
+        "description": null,
+        "source": "manual"
+      },
+      "reportedBy": null,
+      "contact": null,
+      "status": "pending",
+      "priority": "critical",
+      "createdAt": "2026-10-02T05:57:34.677Z",
+      "updatedAt": "2026-10-02T05:57:34.677Z",
+      "acknowledgedAt": null,
+      "resolvedAt": null,
+      "assignedTo": null,
+      "notes": []
+    }
+  ]
+}
