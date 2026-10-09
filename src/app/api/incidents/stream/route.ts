@@ -1,25 +1,40 @@
 import { NextRequest } from "next/server";
+import { getCurrentUser, forbidden, unauthorized } from "@/lib/auth/dal";
 import { getIncidents } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: NextRequest) {
-  let interval: NodeJS.Timeout;
+/** Admin-only live feed of every report. */
+export async function GET(req: NextRequest) {
+  const user = await getCurrentUser();
+  if (!user) return unauthorized();
+  if (user.role !== "admin") return forbidden("Admin access required");
+
+  const encoder = new TextEncoder();
+  let interval: NodeJS.Timeout | undefined;
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = async () => {
         try {
           const incidents = await getIncidents();
-          const payload = `data: ${JSON.stringify({ incidents })}\n\n`;
-          controller.enqueue(new TextEncoder().encode(payload));
-        } catch (e) {
-          const payload = `event: error\ndata: ${JSON.stringify({ error: "stream_error" })}\n\n`;
-          controller.enqueue(new TextEncoder().encode(payload));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ incidents })}\n\n`));
+        } catch {
+          try {
+            controller.enqueue(encoder.encode(`event: error\ndata: {"error":"stream_error"}\n\n`));
+          } catch {
+            // client already disconnected
+          }
         }
       };
+
       await send();
       interval = setInterval(() => {
-        send();
+        if (req.signal.aborted) {
+          if (interval) clearInterval(interval);
+          return;
+        }
+        void send();
       }, 2000);
     },
     cancel() {

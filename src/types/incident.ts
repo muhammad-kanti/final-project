@@ -28,6 +28,7 @@ export interface Incident {
   emergencyType: EmergencyType;
   description: string | null;
   location: IncidentLocation;
+  ownerId: string | null; // null for anonymous reports (admin-only deletion)
   reportedBy: string | null; // name/student id optional
   contact: string | null;
   status: IncidentStatus;
@@ -56,4 +57,5 @@ export interface UpdateIncidentInput {
   notes?: string[];
   location?: Partial<IncidentLocation>;
   description?: string | null;
+  contact?: string | null;
 }

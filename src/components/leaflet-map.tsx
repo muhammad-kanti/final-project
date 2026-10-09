@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GeoCoords } from "@/types/incident";
-
-declare global {
-  interface Window {
-    L: any;
-  }
-}
+import type { LeafletMarker, LeafletStatic } from "@/types/leaflet";
+import {
+  CAMPUS_CENTER,
+  CAMPUS_ZOOM,
+  MAP_LAYER_LABELS,
+  reverseGeocode,
+  searchPlaces,
+  tileSourcesFor,
+  type MapLayer,
+  type PlaceResult,
+} from "@/lib/esri";
 
 interface MapProps {
   center?: GeoCoords | null;
@@ -15,97 +20,155 @@ interface MapProps {
   onManualDescription?: (desc: string) => void;
 }
 
-export function MapPicker({ center, onLocationChange, onManualDescription }: MapProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<any>(null);
-  const markerRef = useRef<any>(null);
-  const [search, setSearch] = useState("");
-  const [manual, setManual] = useState("");
-  const [status, setStatus] = useState<string>("");
+const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+const GEOCODE_DEBOUNCE_MS = 450;
 
-  useEffect(() => {
-    if (!mapRef.current || mapInstance.current) return;
+function loadLeaflet(): Promise<LeafletStatic> {
+  if (typeof window !== "undefined" && window.L) return Promise.resolve(window.L);
 
-    const loadLeaflet = () => {
-      if (window.L) {
-        initMap();
-        return;
-      }
+  return new Promise((resolve, reject) => {
+    if (!document.querySelector(`link[href="${LEAFLET_CSS}"]`)) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      link.href = LEAFLET_CSS;
       document.head.appendChild(link);
-
-      const script = document.createElement("script");
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.async = true;
-      script.onload = initMap;
-      document.body.appendChild(script);
-    };
-
-    loadLeaflet();
-  }, []);
-
-  const reverseGeocode = async (c: GeoCoords) => {
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${c.lat}&lon=${c.lng}`,
-        {
-          headers: { "Accept-Language": "en" },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const addr = data.display_name || null;
-        onLocationChange?.(c, addr);
-        return;
-      }
-    } catch (e) {
-      // ignore
     }
-    onLocationChange?.(c, null);
-  };
 
-  const initMap = () => {
-    if (!mapRef.current || !window.L) return;
-    const L = window.L;
-    const map = L.map(mapRef.current).setView([8.8475, 7.8758], 15);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
-    mapInstance.current = map;
-
-    map.on("click", (e: any) => {
-      const c = { lat: e.latlng.lat, lng: e.latlng.lng };
-      setMarker(c);
-      void reverseGeocode(c);
-    });
-  };
-
-  const setMarker = (c: GeoCoords) => {
-    if (!mapInstance.current || !window.L) return;
-    const L = window.L;
-    if (markerRef.current) {
-      markerRef.current.setLatLng([c.lat, c.lng]);
-    } else {
-      markerRef.current = L.marker([c.lat, c.lng], { draggable: true }).addTo(mapInstance.current);
-      markerRef.current.on("dragend", (e: any) => {
-        const ll = e.target.getLatLng();
-        const cc = { lat: ll.lat, lng: ll.lng };
-        void reverseGeocode(cc);
-      });
+    const onLoad = () => resolve(window.L);
+    const onError = () => reject(new Error("Leaflet failed to load"));
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${LEAFLET_JS}"]`);
+    if (existing) {
+      existing.addEventListener("load", onLoad);
+      existing.addEventListener("error", onError);
+      return;
     }
-    mapInstance.current.setView([c.lat, c.lng], Math.max(mapInstance.current.getZoom(), 16));
-  };
+
+    const script = document.createElement("script");
+    script.src = LEAFLET_JS;
+    script.async = true;
+    script.onload = onLoad;
+    script.onerror = onError;
+    document.body.appendChild(script);
+  });
+}
+
+export function MapPicker({ center, onLocationChange, onManualDescription }: MapProps) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<ReturnType<LeafletStatic["map"]> | null>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
+  const baseLayersRef = useRef<ReturnType<LeafletStatic["tileLayer"]>[]>([]);
+  const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastGeocoded = useRef("");
+  const latestCallback = useRef(onLocationChange);
+
+  const [layer, setLayer] = useState<MapLayer>("street");
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<PlaceResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [manual, setManual] = useState("");
+  const [status, setStatus] = useState("");
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (center && center.lat && center.lng) {
-      setMarker(center);
-      void reverseGeocode(center);
-    }
-  }, [center]);
+    latestCallback.current = onLocationChange;
+  }, [onLocationChange]);
 
-  const useMyLocation = () => {
+  const emitLocation = useCallback((c: GeoCoords) => {
+    const key = `${c.lat.toFixed(6)},${c.lng.toFixed(6)}`;
+    if (key === lastGeocoded.current) return;
+    lastGeocoded.current = key;
+
+    if (geocodeTimer.current) clearTimeout(geocodeTimer.current);
+    geocodeTimer.current = setTimeout(async () => {
+      const label = await reverseGeocode(c);
+      latestCallback.current?.(c, label);
+    }, GEOCODE_DEBOUNCE_MS);
+  }, []);
+
+  const moveMarker = useCallback(
+    (c: GeoCoords) => {
+      const map = mapInstance.current;
+      const L = window.L;
+      if (!map || !L) return;
+
+      if (markerRef.current) {
+        markerRef.current.setLatLng({ lat: c.lat, lng: c.lng });
+      } else {
+        const marker = L.marker({ lat: c.lat, lng: c.lng }, { draggable: true }).addTo(map);
+        marker.on("dragend", (e) => emitLocation(e.target.getLatLng()));
+        markerRef.current = marker;
+      }
+      map.setView({ lat: c.lat, lng: c.lng }, Math.max(map.getZoom(), CAMPUS_ZOOM));
+    },
+    [emitLocation]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mapRef.current) return;
+
+    void loadLeaflet()
+      .then((L) => {
+        if (cancelled || !mapRef.current || mapInstance.current) return;
+        const map = L.map(mapRef.current).setView(
+          { lat: CAMPUS_CENTER.lat, lng: CAMPUS_CENTER.lng },
+          CAMPUS_ZOOM
+        );
+
+        baseLayersRef.current = tileSourcesFor("street").map((src) =>
+          L.tileLayer(src.url, {
+            attribution: src.attribution || undefined,
+            maxNativeZoom: src.maxNativeZoom,
+            maxZoom: 20,
+          })
+        );
+        for (const tl of baseLayersRef.current) tl.addTo(map);
+
+        map.on("click", (e) => {
+          const c = { lat: e.latlng.lat, lng: e.latlng.lng };
+          moveMarker(c);
+          emitLocation(c);
+        });
+
+        mapInstance.current = map;
+      })
+      .catch(() => {
+        if (!cancelled) setMapError("Map could not be loaded. Check your connection.");
+      });
+
+    return () => {
+      cancelled = true;
+      if (geocodeTimer.current) clearTimeout(geocodeTimer.current);
+    };
+  }, [emitLocation, moveMarker]);
+
+  // Adopt coordinates that arrived from outside the map. emitLocation is keyed
+  // on the rounded position, so the state update this triggers cannot feed back
+  // into another geocode request.
+  useEffect(() => {
+    if (!center || !center.lat || !center.lng) return;
+    moveMarker(center);
+    emitLocation(center);
+  }, [center, moveMarker, emitLocation]);
+
+  function changeLayer(next: MapLayer) {
+    const map = mapInstance.current;
+    const L = window.L;
+    if (!map || !L) return;
+
+    for (const tl of baseLayersRef.current) map.removeLayer(tl);
+    baseLayersRef.current = tileSourcesFor(next).map((src) =>
+      L.tileLayer(src.url, {
+        attribution: src.attribution || undefined,
+        maxNativeZoom: src.maxNativeZoom,
+        maxZoom: 20,
+      }).addTo(map)
+    );
+    setLayer(next);
+  }
+
+  function useMyLocation() {
     if (!navigator.geolocation) {
       setStatus("Geolocation not supported");
       return;
@@ -113,51 +176,42 @@ export function MapPicker({ center, onLocationChange, onManualDescription }: Map
     setStatus("Getting location...");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const c = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
-        setMarker(c);
-        void reverseGeocode(c);
+        const c = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        };
+        moveMarker(c);
+        emitLocation(c);
         setStatus("");
       },
-      (err) => {
-        setStatus(err.message || "Failed to get location");
-      },
+      (err) => setStatus(err.message || "Failed to get location"),
       { enableHighAccuracy: true, timeout: 15000 }
     );
-  };
+  }
 
-  const handleSearch = async (e: React.FormEvent) => {
+  async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!search.trim()) return;
-    setStatus("Searching...");
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(search.trim())}`,
-        {
-          headers: { "Accept-Language": "en" },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data[0]) {
-          const first = data[0];
-          const c = { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
-          setMarker(c);
-          onLocationChange?.(c, first.display_name || null);
-          setStatus("");
-          return;
-        }
-      }
-      setStatus("No results found");
-    } catch {
-      setStatus("Search failed");
-    }
-  };
+    setSearching(true);
+    setStatus("");
+    const found = await searchPlaces(search);
+    setResults(found);
+    setSearching(false);
+    if (found.length === 0) setStatus("No matching places found. Try a different description.");
+  }
 
-  const handleManualBlur = () => {
-    if (manual.trim()) {
-      onManualDescription?.(manual.trim());
-    }
-  };
+  function chooseResult(r: PlaceResult) {
+    moveMarker(r);
+    lastGeocoded.current = `${r.lat.toFixed(6)},${r.lng.toFixed(6)}`;
+    latestCallback.current?.({ lat: r.lat, lng: r.lng }, r.label);
+    setResults([]);
+    setSearch("");
+  }
+
+  function handleManualBlur() {
+    if (manual.trim()) onManualDescription?.(manual.trim());
+  }
 
   return (
     <div className="space-y-3">
@@ -169,26 +223,70 @@ export function MapPicker({ center, onLocationChange, onManualDescription }: Map
         >
           Use my current location
         </button>
-        <form onSubmit={handleSearch} className="flex gap-2">
+        <form onSubmit={handleSearch} className="flex flex-1 gap-2">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search place (e.g. NSUK Faculty of Engineering)"
-            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/10"
+            aria-label="Search for a place"
+            className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/10"
           />
           <button
             type="submit"
-            className="rounded-xl border border-violet-600 bg-white px-3 py-2 text-sm font-medium text-violet-700 shadow-sm transition hover:bg-violet-50"
+            disabled={searching}
+            className="rounded-xl border border-violet-600 bg-white px-3 py-2 text-sm font-medium text-violet-700 shadow-sm transition hover:bg-violet-50 disabled:opacity-50"
           >
-            Search
+            {searching ? "..." : "Search"}
           </button>
         </form>
       </div>
+
+      {results.length > 0 && (
+        <ul className="divide-y divide-gray-100 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          {results.map((r) => (
+            <li key={`${r.lat},${r.lng}`}>
+              <button
+                type="button"
+                onClick={() => chooseResult(r)}
+                className="w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-violet-50"
+              >
+                {r.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {status && <p className="text-sm text-gray-600">{status}</p>}
-      <div ref={mapRef} className="h-64 w-full rounded-2xl border border-gray-200 shadow-sm" />
+      {mapError && <p className="text-sm text-red-600">{mapError}</p>}
+
+      <div className="relative">
+        <div ref={mapRef} className="h-64 w-full rounded-2xl border border-gray-200 shadow-sm" />
+        <div className="absolute right-2 top-2 flex overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          {(Object.keys(MAP_LAYER_LABELS) as MapLayer[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => changeLayer(key)}
+              aria-pressed={layer === key}
+              className={`px-2 py-1 text-xs font-medium transition ${
+                layer === key
+                  ? "bg-violet-600 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {MAP_LAYER_LABELS[key]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div>
-        <label className="mb-1 block text-sm font-medium text-gray-900">Or describe location manually</label>
+        <label htmlFor="manual-location" className="mb-1 block text-sm font-medium text-gray-900">
+          Or describe location manually
+        </label>
         <textarea
+          id="manual-location"
           value={manual}
           onChange={(e) => setManual(e.target.value)}
           onBlur={handleManualBlur}
