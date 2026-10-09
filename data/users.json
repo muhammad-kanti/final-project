@@ -1,0 +1,36 @@
+{
+  "users": [
+    {
+      "id": "9f911d2e-1b5f-46ab-a2fe-07d4e0c11fd9",
+      "email": "admin@nsuk.edu.ng",
+      "name": "Campus Security",
+      "passwordHash": "scrypt$16384$8$1$L9e9tZ+hk9xhVXtTghHzoQ==$XzcBJUQWjsQFNH9AFn+OlbIEBG3wiJPRAbtAEUaxbW0FeSl2VthM8cqY2xHZNBQPCPeZO/8VsfVPCXxXfF7ZxA==",
+      "role": "admin",
+      "createdAt": "2026-10-04T19:09:48.051Z"
+    },
+    {
+      "id": "6a0cf70a-34c1-46e7-8bb5-810a00d007ae",
+      "email": "alice@nsuk.edu.ng",
+      "name": "Alice",
+      "passwordHash": "scrypt$16384$8$1$JViqMTV28//fGG0v+z3lqw==$lYI18bwaX7fZcxdKuvBjG+PWOEF9CE0JKNeBI5PD2bVM/3s15mq3Lq55S1FYa1WWyPjvNyvn5Xmhu0M6GxjDOw==",
+      "role": "reporter",
+      "createdAt": "2026-10-04T19:18:25.311Z"
+    },
+    {
+      "id": "21a7ece8-5528-42ff-971e-ce329bde721a",
+      "email": "bob@nsuk.edu.ng",
+      "name": "Bob",
+      "passwordHash": "scrypt$16384$8$1$Gf+XgJ8zUu7ihx51pbcIGw==$qVWHGEcM82Kx57hNekIeHd1s+oo1veG8ZwnP61RtjyK5jZcA/zXlTCB/39gKjMckYB8rUxT50BIAsxwYWhpAGg==",
+      "role": "reporter",
+      "createdAt": "2026-10-04T19:18:25.359Z"
+    },
+    {
+      "id": "0462f749-1f3a-4255-83a4-c30b49f4cb14",
+      "email": "dicco@nsuk.edu.ng",
+      "name": "dicco dicco",
+      "passwordHash": "scrypt$16384$8$1$c3qZ84/H2YLIIKYgTtirtA==$D408BNlbA+oZkC92zlzN0T/oT6jv3ZDr6hKMiNkB0eY6ftJcI+F8F2XYBqcx/v8SatgO1W3eB6iVR5miwTo/nw==",
+      "role": "reporter",
+      "createdAt": "2026-10-09T17:52:46.536Z"
+    }
+  ]
+}
